@@ -1,0 +1,328 @@
+{
+  "name": "WA Debounce — Main",
+  "nodes": [
+    {
+      "id": "node-001",
+      "name": "Webhook — Evolution Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-evolution",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-002",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [420, 160],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "node-003",
+      "name": "Normalize Evolution Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 340],
+      "parameters": {
+        "jsCode": "// ─── Normaliza o payload recebido da Evolution API ───────────────────────\n// Evolution envia diferentes formatos dependendo do tipo de mensagem.\n// Ajuste os caminhos abaixo se o seu webhook usar um envelope diferente.\n\nconst body = $input.first().json;\nconst data = body.data || body;\nconst message = data.message || {};\nconst key = data.key || {};\n\n// chat_id: número do contato (formato: 5511999999999@s.whatsapp.net)\nconst chatId = key.remoteJid || data.remoteJid || '';\nconst fromMe  = key.fromMe === true || data.fromMe === true;\n\n// Timestamp da mensagem em epoch (segundos). Fallback = agora.\nconst ts = Number(data.messageTimestamp) || Math.floor(Date.now() / 1000);\n\n// Extrair texto puro de todos os tipos de mensagem relevantes\nlet text = '';\nif (message.conversation) {\n  text = message.conversation;\n} else if (message.extendedTextMessage?.text) {\n  text = message.extendedTextMessage.text;\n} else if (message.imageMessage?.caption) {\n  text = `[imagem] ${message.imageMessage.caption}`;\n} else if (message.audioMessage) {\n  // Se você tiver um nó de transcrição, coloque o resultado aqui.\n  // Por ora, use um placeholder.\n  text = '[áudio — insira transcrição aqui]';\n} else if (message.documentMessage) {\n  text = `[documento: ${message.documentMessage.fileName || 'sem nome'}]`;\n} else {\n  text = '[mensagem não suportada]';\n}\n\nif (!chatId || !text) {\n  // Encerra a execução silenciosamente para mensagens inválidas\n  return [];\n}\n\nreturn [{\n  json: {\n    provider : 'whatsapp-evolution',\n    chat_id  : chatId,\n    from_me  : fromMe,\n    text     : text,\n    ts       : ts\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-004",
+      "name": "Skip Bot Own Messages",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 340],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-001",
+              "leftValue": "={{ $json.from_me }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-005",
+      "name": "Define Redis Keys",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 340],
+      "parameters": {
+        "jsCode": "// ─── Centraliza a geração de todas as chaves Redis ──────────────────────\n// PARAMETRIZÁVEL: altere ENV abaixo para 'dev', 'staging' ou 'prod'\nconst ENV = 'prod';\n\nconst chatId = $json.chat_id;\nconst myTs   = $json.ts; // timestamp desta mensagem (epoch segundos)\n\n// PARAMETRIZÁVEL: TTL da janela de debounce em segundos (60–300 s)\nconst DEBOUNCE_TTL_SEC = 120;\n\nreturn [{\n  json: {\n    ...$json,\n    env                : ENV,\n    debounce_ttl_sec   : DEBOUNCE_TTL_SEC,\n    debounce_key       : `wa:${ENV}:user:${chatId}`,\n    buffer_key         : `wa:${ENV}:user:${chatId}:buffer`,\n    last_ts_key        : `wa:${ENV}:user:${chatId}:last_ts`,\n    lock_key           : `wa:${ENV}:user:${chatId}:lock`,\n    myTs               : myTs\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-006",
+      "name": "Append to Redis Buffer",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1140, 340],
+      "parameters": {
+        "operation": "rpush",
+        "key": "={{ $json.buffer_key }}",
+        "value": "={{ JSON.stringify({ role: 'user', text: $json.text, ts: $json.myTs }) }}"
+      },
+      "credentials": {
+        "redis": {
+          "id": "redis-cred-id",
+          "name": "Redis_Main"
+        }
+      }
+    },
+    {
+      "id": "node-007",
+      "name": "Update Last TS with TTL",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1380, 340],
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $json.last_ts_key }}",
+        "value": "={{ String($json.myTs) }}",
+        "expire": true,
+        "ttl": "={{ $json.debounce_ttl_sec }}"
+      },
+      "credentials": {
+        "redis": {
+          "id": "redis-cred-id",
+          "name": "Redis_Main"
+        }
+      }
+    },
+    {
+      "id": "node-008",
+      "name": "Debounce Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1620, 340],
+      "webhookId": "debounce-wait-webhook-id",
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.debounce_ttl_sec }}",
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "node-009",
+      "name": "Read Last TS",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1860, 340],
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.last_ts_key }}"
+      },
+      "credentials": {
+        "redis": {
+          "id": "redis-cred-id",
+          "name": "Redis_Main"
+        }
+      }
+    },
+    {
+      "id": "node-010",
+      "name": "Rebuild Context After Wait",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, 340],
+      "parameters": {
+        "jsCode": "// Após o Wait, $json contém somente o resultado do GET do Redis.\n// Recuperamos os metadados originais do nó 'Define Redis Keys'.\nconst original = $('Define Redis Keys').first().json;\nconst redisLastTs = Number($json.value || 0);\n\nreturn [{\n  json: {\n    ...original,\n    redis_last_ts: redisLastTs\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-011",
+      "name": "Check Winner",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2340, 340],
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-002",
+              "leftValue": "={{ $json.redis_last_ts }}",
+              "rightValue": "={{ $json.myTs }}",
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-012",
+      "name": "Stop — Not Latest Message",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2580, 180],
+      "parameters": {}
+    },
+    {
+      "id": "node-013",
+      "name": "Consume Buffer LRANGE",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [2580, 340],
+      "parameters": {
+        "operation": "lrange",
+        "key": "={{ $json.buffer_key }}",
+        "index": 0,
+        "index2": -1
+      },
+      "credentials": {
+        "redis": {
+          "id": "redis-cred-id",
+          "name": "Redis_Main"
+        }
+      }
+    },
+    {
+      "id": "node-014",
+      "name": "Delete Buffer Key",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [2820, 340],
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Check Winner').first().json.buffer_key }}"
+      },
+      "credentials": {
+        "redis": {
+          "id": "redis-cred-id",
+          "name": "Redis_Main"
+        }
+      }
+    },
+    {
+      "id": "node-015",
+      "name": "Parse Buffer Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3060, 340],
+      "parameters": {
+        "jsCode": "// O nó LRANGE do Redis pode retornar:\n//  a) Um único item com value = array de strings\n//  b) Múltiplos items (um por elemento da lista)\n// Normalizamos ambos os casos abaixo.\n\nconst original = $('Check Winner').first().json;\n\n// Coleta todos os items retornados pelo LRANGE\nconst allItems = $input.all();\nlet rawList = [];\n\nif (allItems.length === 1 && Array.isArray(allItems[0].json.value)) {\n  // Caso (a): valor já é array\n  rawList = allItems[0].json.value;\n} else {\n  // Caso (b): cada item é um elemento da lista\n  rawList = allItems.map(i => i.json.value || i.json);\n}\n\nconst messages = rawList\n  .filter(Boolean)\n  .map(item => {\n    try {\n      return typeof item === 'string' ? JSON.parse(item) : item;\n    } catch {\n      return { role: 'user', text: String(item), ts: 0 };\n    }\n  })\n  .sort((a, b) => a.ts - b.ts); // garante ordem cronológica\n\nreturn [{\n  json: {\n    chat_id       : original.chat_id,\n    provider      : original.provider,\n    myTs          : original.myTs,\n    messages_batch: messages\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "node-016",
+      "name": "Execute Memory Subworkflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [3300, 340],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "={{ $vars.MEMORY_SUBWORKFLOW_ID }}",
+          "mode": "id"
+        },
+        "waitForSubWorkflow": true,
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passThrough",
+          "value": {}
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Evolution Inbound": {
+      "main": [
+        [
+          { "node": "Respond 200 OK",              "type": "main", "index": 0 },
+          { "node": "Normalize Evolution Payload",  "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Normalize Evolution Payload": {
+      "main": [
+        [{ "node": "Skip Bot Own Messages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Skip Bot Own Messages": {
+      "main": [
+        [{ "node": "Define Redis Keys", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Define Redis Keys": {
+      "main": [
+        [{ "node": "Append to Redis Buffer", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append to Redis Buffer": {
+      "main": [
+        [{ "node": "Update Last TS with TTL", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Last TS with TTL": {
+      "main": [
+        [{ "node": "Debounce Wait", "type": "main", "index": 0 }]
+      ]
+    },
+    "Debounce Wait": {
+      "main": [
+        [{ "node": "Read Last TS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Last TS": {
+      "main": [
+        [{ "node": "Rebuild Context After Wait", "type": "main", "index": 0 }]
+      ]
+    },
+    "Rebuild Context After Wait": {
+      "main": [
+        [{ "node": "Check Winner", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Winner": {
+      "main": [
+        [{ "node": "Consume Buffer LRANGE",     "type": "main", "index": 0 }],
+        [{ "node": "Stop — Not Latest Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Consume Buffer LRANGE": {
+      "main": [
+        [{ "node": "Delete Buffer Key", "type": "main", "index": 0 }]
+      ]
+    },
+    "Delete Buffer Key": {
+      "main": [
+        [{ "node": "Parse Buffer Messages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Buffer Messages": {
+      "main": [
+        [{ "node": "Execute Memory Subworkflow", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["whatsapp", "debounce", "redis"]
+}

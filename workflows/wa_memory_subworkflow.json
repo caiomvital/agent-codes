@@ -1,0 +1,425 @@
+{
+  "name": "WA Chat Memory & Reply — Sub-workflow",
+  "nodes": [
+    {
+      "id": "sw-001",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 400],
+      "parameters": {}
+    },
+    {
+      "id": "sw-002",
+      "name": "Load Memory from DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT chat_id, rolling_summary, meta_summary, summary_version, last_summary_at FROM chat_threads WHERE chat_id = $1 LIMIT 1",
+        "additionalFields": {
+          "queryParams": "={{ JSON.stringify([$json.chat_id]) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred-id",
+          "name": "Postgres_Main"
+        }
+      }
+    },
+    {
+      "id": "sw-003",
+      "name": "Record Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-sw-001",
+              "leftValue": "={{ $json.chat_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sw-004",
+      "name": "Set Default Memory",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [960, 560],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "chat_id",         "value": "={{ $('Execute Workflow Trigger').first().json.chat_id }}", "type": "string" },
+            { "id": "a2", "name": "rolling_summary",  "value": "",  "type": "string" },
+            { "id": "a3", "name": "meta_summary",     "value": "",  "type": "string" },
+            { "id": "a4", "name": "summary_version",  "value": 0,   "type": "number" },
+            { "id": "a5", "name": "last_summary_at",  "value": 0,   "type": "number" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sw-005",
+      "name": "Merge Memory State",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1200, 400],
+      "parameters": {
+        "mode": "chooseBranch",
+        "chooseBranchMode": "waitForBoth",
+        "output": "both"
+      }
+    },
+    {
+      "id": "sw-006",
+      "name": "Build Progressive Summary Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 400],
+      "parameters": {
+        "jsCode": "// ─── Monta o prompt de atualização do rolling_summary ────────────────────\n// Recupera contexto: memória carregada + lote de novas mensagens\n\n// A origem da memória pode vir do branch 'Record Exists? true' ou do 'Set Default Memory'\nconst trigger    = $('Execute Workflow Trigger').first().json;\nconst memBranch  = $input.first().json; // dados do nó Merge (o que passou)\n\n// Garante fallback para strings vazias\nconst metaSummary    = (memBranch.meta_summary    || '').trim();\nconst rollingSummary = (memBranch.rolling_summary || '').trim();\nconst summaryVersion = Number(memBranch.summary_version || 0);\n\n// Formata as novas mensagens do lote\nconst batch = trigger.messages_batch || [];\nconst formattedMessages = batch\n  .map(m => {\n    const speaker = m.role === 'assistant' ? 'Assistente' : 'Usuário';\n    return `${speaker}: ${m.text}`;\n  })\n  .join('\\n');\n\n// ─── SYSTEM PROMPT ────────────────────────────────────────────────────────\nconst systemPrompt = `Você é a memória de longo prazo de uma conversa 1‑1 no WhatsApp.\nSua função é manter um resumo atualizado, conciso e objetivo do histórico.\nEscreva sempre em terceira pessoa (\"O usuário...\", \"O assistente...\").\nPreserve decisões tomadas, preferências, objetivos e problemas em aberto.\nElimie redundâncias, detalhes supérfluos e informações obsoletas.\nNão ultrapasse 400 palavras no resumo incremental.`;\n\n// ─── USER PROMPT ──────────────────────────────────────────────────────────\nlet userPrompt = '';\n\nif (metaSummary) {\n  userPrompt += `## Meta-resumo (contexto estável de longo prazo)\\n${metaSummary}\\n\\n`;\n}\n\nif (rollingSummary) {\n  userPrompt += `## Resumo incremental atual\\n${rollingSummary}\\n\\n`;\n} else {\n  userPrompt += `## Resumo incremental atual\\n(sem histórico ainda)\\n\\n`;\n}\n\nuserPrompt += `## Novas mensagens desta janela\\n${formattedMessages}\\n\\n`;\nuserPrompt += `## Tarefa\\nAtualize o resumo incremental incorporando as novas mensagens acima.\nMantenha o resultado abaixo de 400 palavras. Retorne SOMENTE o resumo atualizado, sem explicações.`;\n\nreturn [{\n  json: {\n    // dados de controle passados adiante\n    chat_id         : trigger.chat_id,\n    provider        : trigger.provider,\n    myTs            : trigger.myTs,\n    messages_batch  : batch,\n    meta_summary    : metaSummary,\n    rolling_summary : rollingSummary,\n    summary_version : summaryVersion,\n    // prompts para o LLM\n    system_prompt   : systemPrompt,\n    user_prompt     : userPrompt\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-007",
+      "name": "Call LLM — Update Rolling Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1720, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4o-mini',\n  messages: [\n    { role: 'system', content: $json.system_prompt },\n    { role: 'user',   content: $json.user_prompt   }\n  ],\n  max_tokens: 600,\n  temperature: 0.3\n}) }}",
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred-id",
+          "name": "OpenAI_Main"
+        }
+      }
+    },
+    {
+      "id": "sw-008",
+      "name": "Extract New Rolling Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 400],
+      "parameters": {
+        "jsCode": "// Extrai o texto do rolling_summary gerado pelo LLM\nconst llmResponse   = $json;\nconst newRollingSummary = llmResponse.choices?.[0]?.message?.content?.trim() || '';\n\n// Recupera metadados do nó anterior na chain\nconst prev = $('Build Progressive Summary Prompt').first().json;\n\n// PARAMETRIZÁVEL: limite em caracteres para disparar meta-resumo (~250 tokens ≈ 1000 chars)\nconst META_SUMMARY_CHAR_THRESHOLD = 1200;\n\nreturn [{\n  json: {\n    ...prev,\n    new_rolling_summary : newRollingSummary,\n    needs_meta_summary  : newRollingSummary.length > META_SUMMARY_CHAR_THRESHOLD\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-009",
+      "name": "Needs Meta Summary?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2240, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-sw-002",
+              "leftValue": "={{ $json.needs_meta_summary }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sw-010",
+      "name": "Build Meta Summary Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 240],
+      "parameters": {
+        "jsCode": "// ─── Monta o prompt para comprimir rolling → meta-resumo ──────────────────\nconst d = $json;\n\nconst systemPrompt = `Você é a memória de longo prazo desta conversa 1‑1 no WhatsApp.\nSeu trabalho é criar um meta-resumo estável que capture os pontos mais importantes\nda conversa de forma duradoura. Escreva em terceira pessoa.\nSeja extremamente conciso: máximo 200 palavras.\nFoque em: identidade do usuário, preferências duradouras, decisões importantes, objetivos.\nNão inclua detalhes de conversas pontuais.`;\n\nlet userPrompt = '';\nif (d.meta_summary) {\n  userPrompt += `## Meta-resumo anterior\\n${d.meta_summary}\\n\\n`;\n}\nuserPrompt += `## Resumo incremental a comprimir\\n${d.new_rolling_summary}\\n\\n`;\nuserPrompt += `## Tarefa\\nCombine o meta-resumo anterior (se existir) com o resumo incremental acima.\nGere um novo meta-resumo ainda mais conciso (máx 200 palavras).\nRetorne SOMENTE o meta-resumo, sem explicações.`;\n\nreturn [{\n  json: {\n    ...d,\n    meta_system_prompt : systemPrompt,\n    meta_user_prompt   : userPrompt\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-011",
+      "name": "Call LLM — Generate Meta Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2760, 240],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4o-mini',\n  messages: [\n    { role: 'system', content: $json.meta_system_prompt },\n    { role: 'user',   content: $json.meta_user_prompt   }\n  ],\n  max_tokens: 350,\n  temperature: 0.2\n}) }}",
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred-id",
+          "name": "OpenAI_Main"
+        }
+      }
+    },
+    {
+      "id": "sw-012",
+      "name": "Extract Meta Summary & Reset Rolling",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3020, 240],
+      "parameters": {
+        "jsCode": "const llmResp   = $json;\nconst newMeta   = llmResp.choices?.[0]?.message?.content?.trim() || '';\nconst prev      = $('Build Meta Summary Prompt').first().json;\n\n// Após gerar meta-resumo, zeramos (ou reduzimos muito) o rolling_summary\n// para começar um novo ciclo incremental.\n// PARAMETRIZÁVEL: pode manter as últimas N linhas em vez de zerar.\nconst freshRolling = ''; // limpa completamente\n\nreturn [{\n  json: {\n    ...prev,\n    new_meta_summary    : newMeta,\n    new_rolling_summary : freshRolling,\n    summary_version     : prev.summary_version + 1\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-013",
+      "name": "Pass Through — No Meta Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2500, 560],
+      "parameters": {
+        "jsCode": "// Branch sem meta-resumo: mantém meta_summary existente, só atualiza rolling\nconst d = $json;\nreturn [{\n  json: {\n    ...d,\n    new_meta_summary : d.meta_summary // sem mudança\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-014",
+      "name": "Merge Meta Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3280, 400],
+      "parameters": {
+        "mode": "chooseBranch",
+        "chooseBranchMode": "waitForBoth",
+        "output": "both"
+      }
+    },
+    {
+      "id": "sw-015",
+      "name": "Build Final Memory State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3540, 400],
+      "parameters": {
+        "jsCode": "// Consolida os dados vindos de qualquer um dos dois branches (com ou sem meta)\nconst d = $input.first().json;\n\nconst finalRolling  = d.new_rolling_summary ?? d.rolling_summary ?? '';\nconst finalMeta     = d.new_meta_summary    ?? d.meta_summary    ?? '';\nconst finalVersion  = d.summary_version     ?? 0;\n\n// memory_context: o que o bot verá ao gerar a resposta\nlet memoryContext = '';\nif (finalMeta) {\n  memoryContext += `### Memória de longo prazo (meta-resumo)\\n${finalMeta}\\n\\n`;\n}\nif (finalRolling) {\n  memoryContext += `### Resumo recente (incremental)\\n${finalRolling}\\n`;\n}\n\nreturn [{\n  json: {\n    chat_id         : d.chat_id,\n    provider        : d.provider,\n    myTs            : d.myTs,\n    messages_batch  : d.messages_batch,\n    rolling_summary : finalRolling,\n    meta_summary    : finalMeta,\n    summary_version : finalVersion,\n    memory_context  : memoryContext\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-016",
+      "name": "Upsert Memory to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [3800, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chat_threads (chat_id, rolling_summary, meta_summary, summary_version, last_summary_at)\nVALUES ($1, $2, $3, $4, $5)\nON CONFLICT (chat_id)\nDO UPDATE SET\n  rolling_summary  = EXCLUDED.rolling_summary,\n  meta_summary     = EXCLUDED.meta_summary,\n  summary_version  = EXCLUDED.summary_version,\n  last_summary_at  = EXCLUDED.last_summary_at",
+        "additionalFields": {
+          "queryParams": "={{ JSON.stringify([$json.chat_id, $json.rolling_summary, $json.meta_summary, $json.summary_version, $json.myTs]) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres-cred-id",
+          "name": "Postgres_Main"
+        }
+      }
+    },
+    {
+      "id": "sw-017",
+      "name": "Build Reply Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4060, 400],
+      "parameters": {
+        "jsCode": "// ─── Monta o prompt para a resposta ao usuário ───────────────────────────\nconst d = $('Build Final Memory State').first().json;\n\n// PARAMETRIZÁVEL: número de mensagens brutas recentes a incluir no contexto\nconst MAX_RAW_MESSAGES = 10;\n\nconst recentMessages = (d.messages_batch || [])\n  .slice(-MAX_RAW_MESSAGES)\n  .map(m => ({\n    role    : m.role === 'assistant' ? 'assistant' : 'user',\n    content : m.text\n  }));\n\nconst systemPrompt = [\n  `Você é um assistente simpático e útil respondendo via WhatsApp.`,\n  `Seja conciso, natural e informal.`,\n  `Não use markdown pesado — prefira texto plano.`,\n  ``,\n  d.memory_context\n    ? `## Contexto desta conversa (NÃO revele ao usuário)\\n${d.memory_context}`\n    : ''\n].filter(Boolean).join('\\n');\n\n// Monta o array de mensagens para o LLM (formato OpenAI)\nconst llmMessages = [\n  { role: 'system', content: systemPrompt },\n  ...recentMessages\n];\n\nreturn [{\n  json: {\n    ...d,\n    llm_messages: llmMessages\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-018",
+      "name": "Call LLM — Generate Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4320, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'gpt-4o',\n  messages: $json.llm_messages,\n  max_tokens: 400,\n  temperature: 0.7\n}) }}",
+        "options": {}
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-cred-id",
+          "name": "OpenAI_Main"
+        }
+      }
+    },
+    {
+      "id": "sw-019",
+      "name": "Extract Reply Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4580, 400],
+      "parameters": {
+        "jsCode": "const replyText = $json.choices?.[0]?.message?.content?.trim() || '';\nconst d = $('Build Reply Prompt').first().json;\n\nreturn [{\n  json: {\n    chat_id   : d.chat_id,\n    reply_text: replyText\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "sw-020",
+      "name": "Send Reply via Evolution API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4840, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.EVOLUTION_API_URL }}/message/sendText/{{ $vars.EVOLUTION_INSTANCE }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.EVOLUTION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  number : $json.chat_id,\n  text   : $json.reply_text,\n  options: {\n    delay          : 1200,\n    presence       : 'composing',\n    linkPreview    : false\n  }\n}) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Load Memory from DB", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Memory from DB": {
+      "main": [
+        [{ "node": "Record Exists?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Record Exists?": {
+      "main": [
+        [{ "node": "Merge Memory State", "type": "main", "index": 0 }],
+        [{ "node": "Set Default Memory",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Set Default Memory": {
+      "main": [
+        [{ "node": "Merge Memory State", "type": "main", "index": 1 }]
+      ]
+    },
+    "Merge Memory State": {
+      "main": [
+        [{ "node": "Build Progressive Summary Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Progressive Summary Prompt": {
+      "main": [
+        [{ "node": "Call LLM — Update Rolling Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call LLM — Update Rolling Summary": {
+      "main": [
+        [{ "node": "Extract New Rolling Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract New Rolling Summary": {
+      "main": [
+        [{ "node": "Needs Meta Summary?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Meta Summary?": {
+      "main": [
+        [{ "node": "Build Meta Summary Prompt",  "type": "main", "index": 0 }],
+        [{ "node": "Pass Through — No Meta Needed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Meta Summary Prompt": {
+      "main": [
+        [{ "node": "Call LLM — Generate Meta Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call LLM — Generate Meta Summary": {
+      "main": [
+        [{ "node": "Extract Meta Summary & Reset Rolling", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Meta Summary & Reset Rolling": {
+      "main": [
+        [{ "node": "Merge Meta Branches", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pass Through — No Meta Needed": {
+      "main": [
+        [{ "node": "Merge Meta Branches", "type": "main", "index": 1 }]
+      ]
+    },
+    "Merge Meta Branches": {
+      "main": [
+        [{ "node": "Build Final Memory State", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Final Memory State": {
+      "main": [
+        [{ "node": "Upsert Memory to Postgres", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upsert Memory to Postgres": {
+      "main": [
+        [{ "node": "Build Reply Prompt", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Reply Prompt": {
+      "main": [
+        [{ "node": "Call LLM — Generate Reply", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call LLM — Generate Reply": {
+      "main": [
+        [{ "node": "Extract Reply Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Reply Text": {
+      "main": [
+        [{ "node": "Send Reply via Evolution API", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": ["whatsapp", "memory", "subworkflow"]
+}
