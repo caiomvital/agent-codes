@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = ["/dashboard"];
+const PROTECTED_PREFIXES = ["/dashboard", "/nova-analise"];
 const AUTH_ROUTES = ["/login", "/cadastro"];
 
 export async function middleware(request: NextRequest) {
