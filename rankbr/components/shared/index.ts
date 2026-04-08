@@ -1,2 +1,1 @@
-// Exportar componentes compartilhados aqui
-// Exemplo: export { default as Header } from './Header';
+export { AuthProvider, useUser } from "./AuthProvider";

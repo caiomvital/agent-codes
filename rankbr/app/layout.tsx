@@ -1,12 +1,18 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Suspense } from "react";
+import { AuthProvider } from "@/components/shared/AuthProvider";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "RankBR",
-  description: "Plataforma de ranking e análise",
+  title: {
+    default: "RankBR — Diagnóstico de Marketing Digital",
+    template: "%s | RankBR",
+  },
+  description:
+    "Diagnóstico completo de marketing digital + plano de ação personalizado com IA para sua empresa por R$10.",
 };
 
 export default function RootLayout({
@@ -16,7 +22,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        {/*
+         * AuthProvider is a Client Component that manages Supabase auth state.
+         * Suspense is required here because login/page uses useSearchParams(),
+         * which suspends during static rendering.
+         */}
+        <AuthProvider>
+          <Suspense>{children}</Suspense>
+        </AuthProvider>
+      </body>
     </html>
   );
 }
