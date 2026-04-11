@@ -14,8 +14,14 @@ interface ErrorPageProps {
 
 export default function GlobalError({ error, reset }: ErrorPageProps) {
   useEffect(() => {
-    // Log to an error-tracking service when available
-    console.error("[GlobalError]", error);
+    const payload = JSON.stringify({
+      level: "error",
+      message: error.message,
+      context: "GlobalError",
+      digest: error.digest,
+      timestamp: new Date().toISOString(),
+    });
+    console.error(payload);
   }, [error]);
 
   return (

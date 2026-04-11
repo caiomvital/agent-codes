@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createServerSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase";
 import { rodarAnalise } from "@/lib/analise";
 
+export const maxDuration = 30;
+
 const bodySchema = z.object({
   analiseId: z.string().uuid("analiseId deve ser um UUID válido"),
 });

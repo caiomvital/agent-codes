@@ -3,6 +3,8 @@ import { createElement } from "react";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { getMpPayment, validateWebhookSignature } from "@/lib/mercadopago";
 import { rodarAnalise } from "@/lib/analise";
+
+export const maxDuration = 30;
 import { sendEmail } from "@/lib/email";
 import { PagamentoConfirmado } from "@/emails/PagamentoConfirmado";
 
