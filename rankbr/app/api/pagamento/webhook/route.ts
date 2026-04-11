@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createElement } from "react";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { getMpPayment, validateWebhookSignature } from "@/lib/mercadopago";
+import { sendEmail } from "@/lib/email";
+import { PagamentoConfirmado } from "@/emails/PagamentoConfirmado";
 
 /**
  * POST /api/pagamento/webhook
@@ -94,10 +97,10 @@ export async function POST(request: NextRequest) {
 
   const db = createServiceSupabaseClient();
 
-  // 5. Find our pagamento record.
+  // 5. Find our pagamento record (include site data for email).
   const { data: pagamento, error: findError } = await db
     .from("pagamentos")
-    .select("id, status, site_id, user_id")
+    .select("id, status, site_id, user_id, valor, updated_at, sites(nome, url)")
     .eq("id", externalReference)
     .single();
 
@@ -143,8 +146,35 @@ export async function POST(request: NextRequest) {
       // Non-fatal — log and continue. The background worker can recover.
     }
 
-    // TODO: Enqueue AI analysis job here (e.g. trigger a background route,
-    //       Supabase Edge Function, or a queue like BullMQ / Inngest).
+    // Send PagamentoConfirmado email (fire-and-forget).
+    const { data: userData } = await db
+      .from("users")
+      .select("name, email")
+      .eq("id", pagamento.user_id)
+      .single();
+
+    if (userData?.email) {
+      const siteRaw = pagamento.sites;
+      const site    = Array.isArray(siteRaw) ? siteRaw[0] : siteRaw;
+      const appUrl  = process.env.NEXT_PUBLIC_APP_URL ?? "https://rankbr.com.br";
+
+      sendEmail({
+        to: userData.email,
+        subject: "Pagamento confirmado — sua análise começa agora! 🚀",
+        component: createElement(PagamentoConfirmado, {
+          nome:          userData.name ?? userData.email,
+          nomeSite:      site?.nome ?? "Seu site",
+          urlSite:       site?.url  ?? "",
+          valor:         pagamento.valor ?? 10,
+          pagamentoId:   pagamento.id,
+          dataAprovacao: new Date().toISOString(),
+          appUrl,
+        }),
+      }).catch((err) =>
+        console.error("[webhook] Falha ao enviar PagamentoConfirmado:", err)
+      );
+    }
+
     console.log(
       `[webhook] Payment approved — analise queued for site ${pagamento.site_id}`
     );

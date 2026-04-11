@@ -12,7 +12,10 @@
  *   7. Mark analise as "concluida" (or "erro" if fatal)
  */
 
+import { createElement } from "react";
 import { createServiceSupabaseClient } from "@/lib/supabase";
+import { sendEmail } from "@/lib/email";
+import { AnaliseCompleta } from "@/emails/AnaliseCompleta";
 import { analisarPageSpeed }     from "./pagespeed";
 import { analisarSeoBasico }     from "./seo-basico";
 import { buscarGoogleBusiness }  from "./google-business";
@@ -218,6 +221,41 @@ export async function rodarAnalise(analiseId: string): Promise<void> {
         // Non-fatal: log and continue — the full result is already saved.
         console.error("[orquestrador] Falha ao inserir tarefas:", tarefasErr.message);
       }
+    }
+
+    // ── 8. Send AnaliseCompleta email ─────────────────────────────────────
+    const { data: userRow } = await db
+      .from("users")
+      .select("name, email")
+      .eq("id", analise.user_id)
+      .single();
+
+    if (userRow?.email) {
+      const top3 = relatorio.tarefas
+        .sort((a, b) => a.prioridade - b.prioridade)
+        .slice(0, 3)
+        .map((t) => ({ titulo: t.titulo, categoria: t.categoria, prioridade: t.prioridade }));
+
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://rankbr.com.br";
+
+      sendEmail({
+        to: userRow.email,
+        subject: `Diagnóstico de ${site.nome} pronto — score ${scores.score_geral}/100`,
+        component: createElement(AnaliseCompleta, {
+          nome:             userRow.name ?? userRow.email,
+          nomeSite:         site.nome,
+          urlSite:          site.url,
+          scoreGeral:       scores.score_geral,
+          scorePerformance: scores.score_performance,
+          scoreSeo:         scores.score_seo,
+          scoreBusiness:    scores.score_business,
+          top3Tarefas:      top3,
+          analiseId,
+          appUrl,
+        }),
+      }).catch((err) =>
+        console.error("[orquestrador] Falha ao enviar AnaliseCompleta:", err)
+      );
     }
 
     console.log(`[orquestrador] Análise ${analiseId} concluída com sucesso ✓`);

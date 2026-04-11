@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { createElement } from "react";
 import { createServerSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase";
+import { sendEmail } from "@/lib/email";
+import { BemVindo } from "@/emails/BemVindo";
 
 /**
  * Supabase Auth callback handler.
@@ -51,15 +54,17 @@ export async function GET(request: NextRequest) {
   // Uses service client (bypasses RLS) — safe because we derive all values from
   // the verified Supabase auth token, never from user-supplied input.
   const serviceClient = createServiceSupabaseClient();
-  await serviceClient.from("users").upsert(
+  const userName =
+    data.user.user_metadata?.name ??
+    data.user.user_metadata?.full_name ??
+    data.user.email?.split("@")[0] ??
+    "Usuário";
+
+  const { error: upsertError } = await serviceClient.from("users").upsert(
     {
       id: data.user.id,
       email: data.user.email,
-      name:
-        data.user.user_metadata?.name ??
-        data.user.user_metadata?.full_name ??
-        data.user.email?.split("@")[0] ??
-        "Usuário",
+      name: userName,
       role: "user",
       created_at: new Date().toISOString(),
     },
@@ -69,6 +74,22 @@ export async function GET(request: NextRequest) {
       ignoreDuplicates: true,
     }
   );
+
+  // Send BemVindo email only for truly new users (upsert inserted, not skipped).
+  // We detect new users by comparing created_at and last_sign_in_at — if
+  // they're within 60 s of each other this is a brand-new account.
+  const createdAt     = new Date(data.user.created_at).getTime();
+  const lastSignIn    = new Date(data.user.last_sign_in_at ?? data.user.created_at).getTime();
+  const isNewUser     = Math.abs(lastSignIn - createdAt) < 60_000;
+
+  if (isNewUser && data.user.email && !upsertError) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin;
+    sendEmail({
+      to: data.user.email,
+      subject: "Bem-vindo ao RankBR! 🎉",
+      component: createElement(BemVindo, { nome: userName, appUrl }),
+    }).catch((err) => console.error("[auth/callback] Falha ao enviar BemVindo:", err));
+  }
 
   // Redirect to the originally requested page (or dashboard).
   const forwardedHost = request.headers.get("x-forwarded-host");
