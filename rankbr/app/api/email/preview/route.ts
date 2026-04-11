@@ -5,9 +5,10 @@
  * Returns 404 in production.
  *
  * Templates available:
- *   ?template=bem-vindo
+ *   ?template=bem-vindo          (alias: bemvindo)
  *   ?template=pagamento-confirmado
  *   ?template=analise-completa
+ *   ?template=redefinir-senha
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -16,6 +17,7 @@ import { render } from "@react-email/components";
 import { BemVindo }              from "@/emails/BemVindo";
 import { PagamentoConfirmado }   from "@/emails/PagamentoConfirmado";
 import { AnaliseCompleta }       from "@/emails/AnaliseCompleta";
+import { RedefinirSenha }        from "@/emails/RedefinirSenha";
 
 /* ── Sample data for each template ── */
 
@@ -23,6 +25,13 @@ const APP_URL = "http://localhost:3000";
 
 const SAMPLES = {
   "bem-vindo": () =>
+    createElement(BemVindo, {
+      nome:   "João Silva",
+      appUrl: APP_URL,
+    }),
+
+  // Alias without hyphen for convenience
+  "bemvindo": () =>
     createElement(BemVindo, {
       nome:   "João Silva",
       appUrl: APP_URL,
@@ -67,6 +76,11 @@ const SAMPLES = {
       ],
       analiseId: "f1e2d3c4-b5a6-7890-1234-abcdef567890",
       appUrl:    APP_URL,
+    }),
+  "redefinir-senha": () =>
+    createElement(RedefinirSenha, {
+      resetUrl: `${APP_URL}/redefinir-senha?code=sample-token`,
+      appUrl:   APP_URL,
     }),
 } as const;
 

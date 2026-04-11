@@ -109,21 +109,10 @@ export default function CadastroPage() {
       }
 
       // 2a. Email confirmation DISABLED → user gets a session immediately.
+      // Delegate to the server route which upserts the users table record
+      // and sends the BemVindo email (fire-and-forget) using server-side keys.
       if (authData.session) {
-        // Create the public.users record.
-        // Requires RLS: CREATE POLICY "Users can insert own profile"
-        //   ON public.users FOR INSERT WITH CHECK (auth.uid() = id);
-        await supabase.from("users").upsert(
-          {
-            id: authData.user.id,
-            email: authData.user.email,
-            name: data.nome,
-            role: "user",
-            created_at: new Date().toISOString(),
-          },
-          { onConflict: "id", ignoreDuplicates: true }
-        );
-
+        await fetch("/api/auth/cadastro", { method: "POST" });
         router.push("/dashboard");
         return;
       }
