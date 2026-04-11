@@ -95,6 +95,7 @@ export default async function AnalisePage({ params }: PageProps) {
         tarefas={tarefas}
         nomeSite={nomeSite}
         urlSite={urlSite}
+        analiseId={analise.id}
       />
     </div>
   );

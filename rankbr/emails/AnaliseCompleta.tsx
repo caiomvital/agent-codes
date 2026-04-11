@@ -49,7 +49,7 @@ export function AnaliseCompleta({
   appUrl = "https://rankbr.com.br",
 }: AnaliseCompletaProps) {
   const primeiroNome  = nome.split(" ")[0];
-  const relatorioUrl  = `${appUrl}/dashboard`;
+  const relatorioUrl  = `${appUrl}/analises/${analiseId}`;
   const scoreColor    = scoreGeral >= 70 ? GREEN : scoreGeral >= 40 ? "#D97706" : "#DC2626";
   const scoreLabel    = scoreGeral >= 70 ? "Bom" : scoreGeral >= 40 ? "Regular" : "Crítico";
 
@@ -155,6 +155,15 @@ export function AnaliseCompleta({
                 </Text>
               </>
             )}
+
+            {/* PDF note */}
+            <Section style={pdfNoteStyle}>
+              <Text style={pdfNoteText}>
+                📄 <strong>Seu relatório em PDF está disponível no dashboard.</strong>{" "}
+                Acesse o link abaixo e clique em{" "}
+                <em>"Exportar PDF"</em> para baixar o arquivo completo.
+              </Text>
+            </Section>
 
             {/* CTA */}
             <Section style={{ textAlign: "center" as const, margin: "32px 0" }}>
@@ -348,6 +357,21 @@ const tarefaTituloStyle = {
 const tarefaCatStyle = {
   fontSize: "12px",
   color: "#6B7280",
+  margin: 0,
+};
+
+const pdfNoteStyle = {
+  backgroundColor: `${BLUE}0F`,
+  borderLeft: `4px solid ${BLUE}`,
+  borderRadius: "4px",
+  padding: "12px 16px",
+  margin: "16px 0",
+};
+
+const pdfNoteText = {
+  fontSize: "13px",
+  lineHeight: "1.6",
+  color: "#374151",
   margin: 0,
 };
 

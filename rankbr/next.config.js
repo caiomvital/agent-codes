@@ -4,6 +4,11 @@ const nextConfig = {
   // Without this, @react-email/components may fail to resolve in Route Handlers.
   transpilePackages: ["@react-email/components", "resend"],
 
+  // Prevent webpack from bundling @react-pdf/renderer — it uses Buffer/Stream
+  // and other Node.js APIs that must run in the Node.js runtime, not in the
+  // webpack-bundled server bundle.
+  serverExternalPackages: ["@react-pdf/renderer"],
+
   // Suppress known harmless warnings from Supabase realtime / ws.
   webpack(config) {
     config.resolve.fallback = {
