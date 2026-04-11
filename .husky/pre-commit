@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run lint-staged on staged files inside the rankbr project
+cd "$(git rev-parse --show-toplevel)/rankbr"
+npx lint-staged
