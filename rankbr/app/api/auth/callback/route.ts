@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", origin));
   }
 
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
 
   const { data, error: exchangeError } =
     await supabase.auth.exchangeCodeForSession(code);

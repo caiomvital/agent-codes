@@ -107,19 +107,19 @@ export function AnaliseCompleta({
               <Row>
                 <Column style={moduleColStyle}>
                   <Text style={moduleLabelStyle}>Performance</Text>
-                  <Text style={{ ...moduleValueStyle, color: scoreColor(scorePerformance) }}>
+                  <Text style={{ ...moduleValueStyle, color: getScoreColor(scorePerformance) }}>
                     {scorePerformance}
                   </Text>
                 </Column>
                 <Column style={moduleColStyle}>
                   <Text style={moduleLabelStyle}>SEO</Text>
-                  <Text style={{ ...moduleValueStyle, color: scoreColor(scoreSeo) }}>
+                  <Text style={{ ...moduleValueStyle, color: getScoreColor(scoreSeo) }}>
                     {scoreSeo}
                   </Text>
                 </Column>
                 <Column style={moduleColStyle}>
                   <Text style={moduleLabelStyle}>Google Business</Text>
-                  <Text style={{ ...moduleValueStyle, color: scoreColor(scoreBusiness) }}>
+                  <Text style={{ ...moduleValueStyle, color: getScoreColor(scoreBusiness) }}>
                     {scoreBusiness}
                   </Text>
                 </Column>
@@ -193,7 +193,7 @@ export default AnaliseCompleta;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function scoreColor(score: number): string {
+function getScoreColor(score: number): string {
   if (score >= 70) return GREEN;
   if (score >= 40) return "#D97706";
   return "#DC2626";

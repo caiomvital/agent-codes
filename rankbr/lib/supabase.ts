@@ -17,9 +17,10 @@ export function createClient() {
 /**
  * Server Component, Route Handler and Server Action client.
  * Reads/writes session cookies via next/headers.
+ * Async to support both Next.js 14 (sync cookies) and Next.js 15 (async cookies).
  */
-export function createServerSupabaseClient() {
-  const cookieStore = cookies();
+export async function createServerSupabaseClient() {
+  const cookieStore = await cookies();
 
   return _createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
