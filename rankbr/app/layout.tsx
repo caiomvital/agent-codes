@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Suspense } from "react";
 import { AuthProvider } from "@/components/shared/AuthProvider";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -30,6 +31,7 @@ export default function RootLayout({
          */}
         <AuthProvider>
           <Suspense>{children}</Suspense>
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

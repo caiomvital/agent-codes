@@ -6,7 +6,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
-  BarChart3,
   Globe,
   Building2,
   MapPin,
@@ -104,33 +103,16 @@ export default function NovaAnalisePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ── Top bar ──────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-gray-100 bg-white/95 backdrop-blur-sm">
-        <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4 sm:px-6">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-lg"
-              style={{ backgroundColor: GREEN }}
-            >
-              <BarChart3 className="h-4 w-4 text-white" />
-            </div>
-            <span className="text-lg font-bold" style={{ color: BLUE }}>
-              Rank<span style={{ color: GREEN }}>BR</span>
-            </span>
-          </Link>
-
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Dashboard
-          </Link>
-        </div>
-      </header>
-
       {/* ── Content ──────────────────────────────────────────────────── */}
-      <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        {/* Back link — replaces the removed top bar */}
+        <Link
+          href="/dashboard"
+          className="mb-6 inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Voltar ao dashboard
+        </Link>
         {/* Page header */}
         <div className="mb-8">
           <p

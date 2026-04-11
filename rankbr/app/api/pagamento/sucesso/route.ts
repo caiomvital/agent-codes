@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { getMpPayment } from "@/lib/mercadopago";
+import { rodarAnalise } from "@/lib/analise";
 
 /**
  * GET /api/pagamento/sucesso
@@ -74,15 +75,22 @@ export async function GET(request: NextRequest) {
     .eq("pagamento_id", externalReference)
     .single();
 
-  // 5. Advance analise to "processando" if it hasn't been already.
-  if (analise && analise.status === "aguardando") {
-    await db
-      .from("analises")
-      .update({
-        status: "processando",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", analise.id);
+  // 5. Advance analise to "processando" if not already, then fire analysis.
+  // The webhook may have already done this — rodarAnalise is idempotent.
+  if (analise) {
+    if (analise.status === "aguardando") {
+      await db
+        .from("analises")
+        .update({ status: "processando", updated_at: new Date().toISOString() })
+        .eq("id", analise.id);
+    }
+
+    // Fire pipeline if not already running or done (safety net for missed webhooks).
+    if (analise.status !== "concluida" && analise.status !== "erro") {
+      rodarAnalise(analise.id).catch((err) =>
+        console.error("[sucesso] Falha em rodarAnalise:", err)
+      );
+    }
   }
 
   // 6. Redirect to the dashboard with the analise ID so the UI can poll for results.

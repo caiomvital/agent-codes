@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createElement } from "react";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { getMpPayment, validateWebhookSignature } from "@/lib/mercadopago";
+import { rodarAnalise } from "@/lib/analise";
 import { sendEmail } from "@/lib/email";
 import { PagamentoConfirmado } from "@/emails/PagamentoConfirmado";
 
@@ -130,20 +131,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "DB update failed" }, { status: 500 });
   }
 
-  // 8. On approval, move the analise to "processando" to trigger the AI pipeline.
+  // 8. On approval, move the analise to "processando" and fire the AI pipeline.
   if (novoStatus === "aprovado") {
-    const { error: analiseError } = await db
+    const { data: analiseRow, error: analiseError } = await db
       .from("analises")
       .update({
         status: "processando",
         updated_at: new Date().toISOString(),
       })
       .eq("pagamento_id", pagamento.id)
-      .eq("status", "aguardando"); // Only update if not already processing/done.
+      .eq("status", "aguardando") // Only update if not already processing/done.
+      .select("id")
+      .single();
 
     if (analiseError) {
       console.error("[webhook] Failed to update analise:", analiseError);
-      // Non-fatal — log and continue. The background worker can recover.
+      // Non-fatal — log and continue.
+    }
+
+    // Fire analysis pipeline in background (idempotent — orchestrator handles duplicates).
+    if (analiseRow?.id) {
+      rodarAnalise(analiseRow.id).catch((err) =>
+        console.error("[webhook] Falha em rodarAnalise:", err)
+      );
     }
 
     // Send PagamentoConfirmado email (fire-and-forget).

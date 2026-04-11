@@ -135,11 +135,9 @@ export default async function AnalisesPage() {
             const Icon    = cfg.icon;
             const score   = (analise.resultado as { score_geral?: number } | null)?.score_geral;
             const isActive = analise.status === "aguardando" || analise.status === "processando";
-            const href    = analise.status === "concluida"
-              ? `/dashboard`
-              : isActive
-                ? `/dashboard`
-                : undefined;
+            const href    = (analise.status === "concluida" || isActive)
+              ? `/analises/${analise.id}`
+              : undefined;
 
             return (
               <div
@@ -177,7 +175,7 @@ export default async function AnalisesPage() {
                     href={href}
                     className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
                   >
-                    {analise.status === "concluida" ? "Ver relatório" : "Acompanhar"}
+                    {analise.status === "concluida" ? "Ver relatório" : "Acompanhar →"}
                   </Link>
                 )}
               </div>

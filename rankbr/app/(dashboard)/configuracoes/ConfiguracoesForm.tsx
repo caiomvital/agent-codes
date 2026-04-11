@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "@/hooks/use-toast";
 import { User, Mail, Save, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -270,10 +271,10 @@ function DeleteAccountButton() {
         router.push("/login?message=conta-excluida");
       } else {
         const json = await res.json().catch(() => ({}));
-        alert(json.error ?? "Erro ao excluir conta. Entre em contato com o suporte.");
+        toast.error("Erro ao excluir conta", json.error ?? "Entre em contato com o suporte.");
       }
     } catch {
-      alert("Erro de conexão. Tente novamente.");
+      toast.error("Erro de conexão", "Verifique sua internet e tente novamente.");
     } finally {
       setLoading(false);
       setConfirming(false);
