@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /analises
+Disallow: /configuracoes
+Disallow: /nova-analise
+Disallow: /api/
+
+Sitemap: https://rankbr.com.br/sitemap.xml
